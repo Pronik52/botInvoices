@@ -1,0 +1,36 @@
+# Credentials and local environment (keep only the documented example).
+.env
+.env.*
+!.env.example
+env
+env/
+.venv/
+venv/
+secrets/
+*service-account*.json
+telegram-token
+telegram-owner.json
+*.pem
+*.key
+
+# Personal configuration, templates, archives and deployment notes.
+defaults.json
+templates/*.xlsx
+data/
+backups/
+*.sqlite*
+*.db
+work/
+outputs/
+docs/superpowers/
+doc/numbering.md
+doc/signature-check.md
+compose.local.yaml
+
+# Generated files and editor metadata.
+__pycache__/
+*.py[cod]
+.DS_Store
+.idea/
+.vscode/
+.superpowers/

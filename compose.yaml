@@ -1,0 +1,51 @@
+services:
+  bot:
+    build: .
+    image: invoice-maker-bot:local
+    container_name: invoice-maker-bot
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
+    restart: unless-stopped
+    init: true
+    read_only: true
+    mem_limit: 160m
+    memswap_limit: 256m
+    pids_limit: 64
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      CONFIG_DIR: /run/invoice-maker
+      DATA_DIR: /data
+      EXPECTED_BOT_USERNAME: ${EXPECTED_BOT_USERNAME:-}
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SECRETS_DIR:-./secrets}
+        target: /run/invoice-maker
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DEFAULTS_FILE:-./defaults.json}
+        target: /app/defaults.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TEMPLATES_DIR:-./templates}
+        target: /app/templates
+        read_only: true
+        bind:
+          create_host_path: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

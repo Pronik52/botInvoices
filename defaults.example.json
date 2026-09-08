@@ -1,0 +1,32 @@
+{
+  "spreadsheet_id": "YOUR_SPREADSHEET_ID",
+  "next_number": 1,
+  "due_day": 10,
+  "service_name": "Доработка и поддержка продуктов 1С",
+  "initial_contract": {
+    "number": "1",
+    "date": "2026-01-01"
+  },
+  "supplier": {
+    "name": "Исполнитель Тестович",
+    "short_name": "Исполнитель Т.",
+    "inn": "000000000000",
+    "kpp": "",
+    "phone": "",
+    "account": "00000000000000000000",
+    "bank": "Банк получателя",
+    "bik": "000000000",
+    "correspondent": "00000000000000000000"
+  },
+  "customer": {
+    "name": "ООО Заказчик",
+    "inn": "0000000000",
+    "kpp": "",
+    "address": "",
+    "phone": "",
+    "account": "",
+    "bank": "",
+    "bik": "",
+    "correspondent": ""
+  }
+}
