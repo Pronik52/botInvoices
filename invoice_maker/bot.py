@@ -1,10 +1,12 @@
 """Private Russian-language Telegram dialogs."""
 import asyncio
+import logging
 import re
 from datetime import datetime
 from io import BytesIO
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import TimedOut
 
 from .domain import clean, money
 from .workflow import PreviewChanged, is_owner
@@ -16,6 +18,7 @@ FIELDS = {
 }
 HOME = [[('Создать акт и счёт', 'sheets')], [('Архив документов', 'archive:0')], [('Настройки', 'settings')]]
 CANCEL = [[('Отмена', 'home')]]
+LOGGER = logging.getLogger('invoice_maker.delivery')
 
 
 def date_text(value):
@@ -80,20 +83,39 @@ class BotController:
         buttons = [[('Обновить документы' if preview['existing_id'] else 'Создать два Excel-файла', f'confirm:{token}')],
                    [('Изменить срок оплаты', f'due:{token}')]]
         if preview['existing_id']:
-            buttons.append([('Скачать ранее созданные', f"download:{preview['existing_id']}")])
+            buttons.append([('Скачать акт', f"download:{preview['existing_id']}:act"),
+                            ('Скачать счёт', f"download:{preview['existing_id']}:invoice")])
         buttons += [[('Выбрать другой месяц', 'sheets')], [('Настройки', 'settings')]]
         await self.say(update, text, buttons)
 
-    async def send_documents(self, update, record):
+    async def send_documents(self, update, record, kind=None):
         if not record:
             raise ValueError('Документы не найдены в архиве.')
+        if kind not in (None, 'act', 'invoice'):
+            raise ValueError('Неизвестный тип документа.')
         payload = record['payload']
         title = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', payload['month_title'])[:60]
+        uncertain = False
         for key, label in [('act', 'Акт'), ('invoice', 'Счёт')]:
-            await update.effective_message.reply_document(
-                document=BytesIO(record[key]), filename=f"{label} {record['number']} {title}.xlsx",
-                caption=f"{label} №{record['number']} от {date_text(payload['date'])} · {money(payload['total'])} ₽")
-        await self.say(update, 'Документы сохранены в архиве. Повторное скачивание не меняет номер и дату.', HOME)
+            if kind is not None and key != kind:
+                continue
+            try:
+                await update.effective_message.reply_document(
+                    document=BytesIO(record[key]), filename=f"{label} {record['number']} {title}.xlsx",
+                    caption=f"{label} №{record['number']} от {date_text(payload['date'])} · {money(payload['total'])} ₽",
+                    read_timeout=90, write_timeout=90, connect_timeout=30)
+            except TimedOut:
+                # Telegram may have accepted the upload even if its reply timed out.
+                # Continue with the other file, then offer independent archive links.
+                LOGGER.warning('Telegram timed out sending %s for archive version %s', key, record['id'])
+                uncertain = True
+        if uncertain:
+            await self.say(update, 'Telegram не подтвердил отправку одного из файлов. Проверьте чат; недостающий файл можно скачать отдельно из архива.',
+                           [[('Скачать акт', f"download:{record['id']}:act"),
+                             ('Скачать счёт', f"download:{record['id']}:invoice")],
+                            [('Главное меню', 'home')]])
+        else:
+            await self.say(update, 'Документы сохранены в архиве. Повторное скачивание не меняет номер и дату.', HOME)
 
     async def settings_menu(self, update):
         self.dialog.clear()
@@ -135,7 +157,9 @@ class BotController:
         self.dialog.clear()
         self.workflow.clear()
         records = self.store.archive(limit=11, offset=page*10)
-        buttons = [[(f"№{r['number']} · {r['payload']['month_title']} · {date_text(r['payload']['date'])}", f"download:{r['id']}")] for r in records[:10]]
+        buttons = [[(f"Акт №{r['number']} · {r['payload']['month_title']}", f"download:{r['id']}:act"),
+                    (f"Счёт №{r['number']} · {r['payload']['month_title']}", f"download:{r['id']}:invoice")]
+                   for r in records[:10]]
         navigation = []
         if page:
             navigation.append(('Назад', f'archive:{page-1}'))
@@ -233,7 +257,8 @@ class BotController:
                 await self.say(update, 'Введите срок оплаты в формате ДД.ММ.ГГГГ.', CANCEL)
             elif command == 'download':
                 self.dialog.clear()
-                await self.send_documents(update, self.store.get_version(int(argument)))
+                version_id, _, kind = argument.partition(':')
+                await self.send_documents(update, self.store.get_version(int(version_id)), kind or None)
             elif command == 'settings':
                 await self.settings_menu(update)
             elif command == 'party':

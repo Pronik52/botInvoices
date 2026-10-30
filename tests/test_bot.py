@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from telegram.error import TimedOut
 
 try:
     from invoice_maker.bot import BotController
@@ -63,6 +64,49 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         values = [button.callback_data for row in buttons for button in row]
         self.assertIn('select:99', values)
         self.assertIn('sheets:3', values)
+
+    async def test_timeout_sending_act_still_attempts_invoice_and_offers_individual_downloads(self):
+        record = {'id': 8, 'number': 10,
+                  'payload': {'month_title': 'Октябрь 26', 'date': '2026-10-30', 'total': '45000.00'},
+                  'act': b'act-file', 'invoice': b'invoice-file'}
+        target = update(callback='download:8')
+        target.effective_message.reply_document.side_effect = [TimedOut(), None]
+        controller = BotController(12, None, None, None)
+        await controller.send_documents(target, record)
+        calls = target.effective_message.reply_document.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].kwargs['document'].getvalue(), b'act-file')
+        self.assertEqual(calls[1].kwargs['document'].getvalue(), b'invoice-file')
+        self.assertGreaterEqual(calls[1].kwargs['write_timeout'], 60)
+        message = target.effective_message.reply_text.call_args
+        self.assertIn('проверьте', message.args[0].lower())
+        callbacks = [button.callback_data for row in message.kwargs['reply_markup'].inline_keyboard for button in row]
+        self.assertIn('download:8:act', callbacks)
+        self.assertIn('download:8:invoice', callbacks)
+
+    async def test_archive_can_send_only_invoice_without_reissuing_documents(self):
+        record = {'id': 8, 'number': 10,
+                  'payload': {'month_title': 'Октябрь 26', 'date': '2026-10-30', 'total': '45000.00'},
+                  'act': b'act-file', 'invoice': b'invoice-file'}
+        class Store:
+            def archive(self, limit, offset):
+                return [dict(id=record['id'], number=record['number'], payload=record['payload'])]
+            def get_version(self, version_id):
+                return record if version_id == 8 else None
+        class Workflow:
+            def clear(self):
+                pass
+        controller = BotController(12, Store(), None, Workflow())
+        menu = update(callback='archive:0')
+        await controller.on_callback(menu, None)
+        callbacks = [button.callback_data for row in menu.effective_message.reply_text.call_args.kwargs['reply_markup'].inline_keyboard for button in row]
+        self.assertIn('download:8:invoice', callbacks)
+        target = update(callback='download:8:invoice')
+        await controller.on_callback(target, None)
+        calls = target.effective_message.reply_document.call_args_list
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].kwargs['document'].getvalue(), b'invoice-file')
+        self.assertIn('Счёт 10 Октябрь 26.xlsx', calls[0].kwargs['filename'])
 
 
 if __name__ == '__main__':
